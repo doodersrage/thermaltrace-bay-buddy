@@ -1,6 +1,6 @@
 [package]
 name = "bay-buddy"
-version = "0.1.0"
+version = "0.1.1"
 description = "Bay Buddy — ThermalTrace desktop companion for freeze & flood vibes"
 authors = ["ThermalTrace"]
 edition = "2021"

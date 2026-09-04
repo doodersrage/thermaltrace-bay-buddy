@@ -35,6 +35,10 @@ Outputs land under `src-tauri/target/release/bundle/` (AppImage / deb / rpm on L
 
 On some Linux hosts AppImage packing needs `APPIMAGE_EXTRACT_AND_RUN=1` (already set in `npm run tauri:build`).
 
+### Linux / NVIDIA note
+
+On NVIDIA + Wayland, WebKit can abort with `Could not create GBM EGL display`. Bay Buddy sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` at startup so the AppImage should just work. Override by exporting that variable yourself if needed.
+
 ## Release
 
 Push a version tag (`v0.1.0`). GitHub Actions builds Linux, Windows, and macOS and attaches installers to the release.
