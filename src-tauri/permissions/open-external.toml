@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-open-external"
+description = "Open http(s) links in the system browser (AppImage-safe env)"
+commands.allow = ["open_external"]

@@ -1,12 +1,14 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { invoke } from "@tauri-apps/api/core";
 import { DEMO_NEAR_MISSES, demoBuddyState } from "./mood";
 import type { BuddyState, NearMiss } from "./types";
 
 const THERMALTRACE_URL = "https://thermaltrace.dev";
-const CONNECT_URL = "https://thermaltrace.dev";
+const CONNECT_URL = "https://thermaltrace.dev/signin";
+const ALERTS_URL = "https://thermaltrace.dev/dashboard/alerts";
 
 let demoTick = 0;
 let state: BuddyState = demoBuddyState(0);
+let statusMessage = "";
 
 function formatTemp(f: number | null): string {
   if (f === null) return "—";
@@ -25,11 +27,22 @@ function formatHours(h: number | null): string {
   return `${h.toFixed(1)}h`;
 }
 
-async function openExternal(url: string) {
+async function openExternal(url: string, app: HTMLElement) {
+  statusMessage = "";
   try {
-    await openUrl(url);
-  } catch {
-    window.open(url, "_blank", "noopener,noreferrer");
+    await invoke("open_external", { url });
+    statusMessage = "Opened in your browser";
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    statusMessage = `Couldn’t open browser: ${detail}`;
+    console.error("open_external failed", err);
+  }
+  render(app);
+  if (statusMessage === "Opened in your browser") {
+    window.setTimeout(() => {
+      statusMessage = "";
+      render(app);
+    }, 2000);
   }
 }
 
@@ -100,6 +113,11 @@ function render(app: HTMLElement) {
       <button type="button" class="btn-ghost" id="btn-alerts">
         Alert settings on thermaltrace.dev
       </button>
+      ${
+        statusMessage
+          ? `<p class="action-status" role="status">${statusMessage}</p>`
+          : ""
+      }
     </div>
 
     <section>
@@ -116,14 +134,14 @@ function render(app: HTMLElement) {
   `;
 
   app.querySelector("#btn-connect")?.addEventListener("click", () => {
-    void openExternal(state.connected ? THERMALTRACE_URL : CONNECT_URL);
+    void openExternal(state.connected ? THERMALTRACE_URL : CONNECT_URL, app);
   });
   app.querySelector("#btn-alerts")?.addEventListener("click", () => {
-    void openExternal(`${THERMALTRACE_URL}/alerts`);
+    void openExternal(ALERTS_URL, app);
   });
   app.querySelector("#link-tt")?.addEventListener("click", (e) => {
     e.preventDefault();
-    void openExternal(THERMALTRACE_URL);
+    void openExternal(THERMALTRACE_URL, app);
   });
   app.querySelector("#btn-demo")?.addEventListener("click", () => {
     demoTick += 1;

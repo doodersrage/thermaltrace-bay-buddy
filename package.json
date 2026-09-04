@@ -1,7 +1,7 @@
 {
   "name": "bay-buddy",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Bay Buddy — ThermalTrace desktop companion",
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "env APPIMAGE_EXTRACT_AND_RUN=1 tauri build"
+    "tauri:build": "env APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=true tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

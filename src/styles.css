@@ -277,6 +277,13 @@ button:active,
   font-size: 0.9rem;
 }
 
+.action-status {
+  margin: 0.15rem 0 0;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--thermal-soft);
+}
+
 section h2 {
   font-family: Sora, sans-serif;
   font-size: 0.95rem;
