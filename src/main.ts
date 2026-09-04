@@ -31,18 +31,18 @@ async function openExternal(url: string, app: HTMLElement) {
   statusMessage = "";
   try {
     await invoke("open_external", { url });
-    statusMessage = "Opened in your browser";
+    statusMessage = `Opening ${url}`;
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    statusMessage = `Couldn’t open browser: ${detail}`;
+    statusMessage = `Couldn’t open browser. Copy this URL: ${url} (${detail})`;
     console.error("open_external failed", err);
   }
   render(app);
-  if (statusMessage === "Opened in your browser") {
+  if (statusMessage.startsWith("Opening ")) {
     window.setTimeout(() => {
       statusMessage = "";
       render(app);
-    }, 2000);
+    }, 3500);
   }
 }
 
