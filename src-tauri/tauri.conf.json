@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Bay Buddy",
+  "version": "0.1.0",
+  "identifier": "com.thermaltrace.baybuddy",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Bay Buddy",
+        "width": 420,
+        "height": 760,
+        "resizable": true,
+        "minWidth": 360,
+        "minHeight": 640
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://thermaltrace.dev"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["appimage", "deb", "rpm", "nsis", "msi", "dmg", "app"],
+    "category": "Lifestyle",
+    "shortDescription": "ThermalTrace companion for garage freeze & flood vibes",
+    "longDescription": "Bay Buddy is a desktop companion for ThermalTrace. Watch freeze margin, door drafts, and leak panic moods for one space — alerts and history stay on thermaltrace.dev.",
+    "publisher": "ThermalTrace",
+    "homepage": "https://thermaltrace.dev",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {}
+}
