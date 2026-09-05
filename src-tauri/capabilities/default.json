@@ -10,6 +10,11 @@
     "allow-start-companion-login",
     "allow-disconnect-companion",
     "allow-has-companion-session",
-    "allow-fetch-buddy-state"
+    "allow-fetch-buddy-state",
+    "allow-list-serial-ports",
+    "allow-puck-info",
+    "allow-claim-puck",
+    "allow-push-puck-mood",
+    "allow-fetch-bay-mood"
   ]
 }

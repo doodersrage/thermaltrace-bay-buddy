@@ -1,7 +1,7 @@
 {
   "name": "bay-buddy",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Bay Buddy — ThermalTrace desktop companion",
   "type": "module",
   "scripts": {

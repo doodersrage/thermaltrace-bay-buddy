@@ -19,6 +19,25 @@ interface LiveBuddyPayload {
   lastUpdated: string;
 }
 
+interface SerialPortInfo {
+  path: string;
+  name: string;
+}
+
+interface ClaimPuckResult {
+  deviceId: string;
+  bayId: string;
+  spaceName: string;
+  message: string;
+}
+
+interface BayMoodPayload {
+  bayId: string;
+  mood: string;
+  spaceName?: string | null;
+  source?: string | null;
+}
+
 let demoTick = 0;
 let previousMargin: number | null = null;
 let state: BuddyState = demoBuddyState(0);
@@ -26,6 +45,23 @@ let statusMessage = "";
 let connecting = false;
 let pollTimer: number | null = null;
 let selectedSpace: string | null = null;
+
+let serialPorts: SerialPortInfo[] = [];
+let selectedPort = "";
+let puckBusy = false;
+let followEnabled = false;
+let followTimer: number | null = null;
+let lastPuckMood: string | null = null;
+let claimedBayId: string | null = null;
+
+function bayIdFromSpace(space: string): string {
+  return space
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_.:-]/g, "")
+    .slice(0, 32);
+}
 
 function formatTemp(f: number | null): string {
   if (f === null) return "—";
@@ -103,6 +139,14 @@ function stopPolling() {
   }
 }
 
+function stopFollow() {
+  followEnabled = false;
+  if (followTimer !== null) {
+    window.clearInterval(followTimer);
+    followTimer = null;
+  }
+}
+
 function startPolling(app: HTMLElement) {
   stopPolling();
   pollTimer = window.setInterval(() => {
@@ -121,6 +165,7 @@ async function refreshLive(app: HTMLElement, showStatus: boolean) {
     const detail = err instanceof Error ? err.message : String(err);
     if (detail.toLowerCase().includes("session expired")) {
       stopPolling();
+      stopFollow();
       state = demoBuddyState(0);
       statusMessage = "Session expired — connect again";
     } else if (showStatus) {
@@ -142,6 +187,7 @@ async function connect(app: HTMLElement, provider?: string) {
     selectedSpace = payload.spaceName;
     statusMessage = `Connected to ${payload.spaceName}`;
     startPolling(app);
+    await refreshPorts(app, false);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     statusMessage = `Connect failed: ${detail}`;
@@ -153,12 +199,111 @@ async function connect(app: HTMLElement, provider?: string) {
 
 async function disconnect(app: HTMLElement) {
   stopPolling();
+  stopFollow();
   await invoke("disconnect_companion");
   previousMargin = null;
   selectedSpace = null;
+  claimedBayId = null;
+  lastPuckMood = null;
   state = demoBuddyState(0);
   statusMessage = "Disconnected — back to demo mode";
   render(app);
+}
+
+async function refreshPorts(app: HTMLElement, showStatus: boolean) {
+  try {
+    serialPorts = await invoke<SerialPortInfo[]>("list_serial_ports");
+    if (!selectedPort || !serialPorts.some((p) => p.path === selectedPort)) {
+      const preferred =
+        serialPorts.find((p) => /acm|usb|cu\.usb/i.test(p.path)) ?? serialPorts[0];
+      selectedPort = preferred?.path ?? "";
+    }
+    if (showStatus) {
+      statusMessage = serialPorts.length
+        ? `Found ${serialPorts.length} serial port${serialPorts.length === 1 ? "" : "s"}`
+        : "No serial ports found — plug in the RP2040-Zero";
+    }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    statusMessage = `Port scan failed: ${detail}`;
+  }
+  render(app);
+}
+
+async function claimSelectedPuck(app: HTMLElement) {
+  if (!selectedPort) {
+    statusMessage = "Pick a serial port first";
+    render(app);
+    return;
+  }
+  const bay = bayIdFromSpace(selectedSpace || state.spaceName || "garage");
+  puckBusy = true;
+  statusMessage =
+    "Claiming… when the puck LED turns yellow, press the GP4 button within 30s.";
+  render(app);
+  try {
+    const result = await invoke<ClaimPuckResult>("claim_puck", {
+      port: selectedPort,
+      bayId: bay,
+      spaceName: state.spaceName || bay,
+    });
+    claimedBayId = result.bayId;
+    lastPuckMood = "cozy";
+    statusMessage = result.message;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    statusMessage = `Claim failed: ${detail}`;
+  } finally {
+    puckBusy = false;
+    render(app);
+  }
+}
+
+async function followTick(app: HTMLElement) {
+  if (!followEnabled || !selectedPort || !claimedBayId) return;
+  try {
+    const bay = await invoke<BayMoodPayload>("fetch_bay_mood", {
+      bayId: claimedBayId,
+    });
+    if (bay.mood !== lastPuckMood) {
+      const resp = await invoke<string>("push_puck_mood", {
+        port: selectedPort,
+        mood: bay.mood,
+      });
+      lastPuckMood = bay.mood;
+      statusMessage = `Puck ← ${bay.mood}${bay.source ? ` (${bay.source})` : ""} · ${resp}`;
+      render(app);
+    }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    statusMessage = `Follow paused: ${detail}`;
+    stopFollow();
+    render(app);
+  }
+}
+
+function toggleFollow(app: HTMLElement) {
+  if (followEnabled) {
+    stopFollow();
+    statusMessage = "Stopped driving the claim puck";
+    render(app);
+    return;
+  }
+  if (!selectedPort) {
+    statusMessage = "Pick a serial port first";
+    render(app);
+    return;
+  }
+  if (!claimedBayId) {
+    claimedBayId = bayIdFromSpace(selectedSpace || state.spaceName || "garage");
+  }
+  followEnabled = true;
+  statusMessage = `Driving puck for bay “${claimedBayId}”…`;
+  render(app);
+  void followTick(app);
+  followTimer = window.setInterval(() => {
+    void followTick(app);
+  }, 2_000);
 }
 
 function renderNearMisses(items: NearMiss[]): string {
@@ -172,6 +317,47 @@ function renderNearMisses(items: NearMiss[]): string {
       </li>`,
     )
     .join("");
+}
+
+function renderPuckSection(): string {
+  if (!state.connected) return "";
+  const options = serialPorts
+    .map(
+      (p) =>
+        `<option value="${p.path}" ${p.path === selectedPort ? "selected" : ""}>${p.name}</option>`,
+    )
+    .join("");
+  const bay = claimedBayId || bayIdFromSpace(selectedSpace || state.spaceName || "garage");
+  return `
+    <section class="puck-panel">
+      <h2>Claim puck</h2>
+      <p class="puck-hint">
+        Plug in an RP2040-Zero running claim-puck firmware. Wire a button from GP4 to GND.
+        Bay id: <code>${bay}</code>
+      </p>
+      <label class="field-label" for="puck-port">Serial port</label>
+      <select id="puck-port" ${puckBusy ? "disabled" : ""}>
+        <option value="">Select port…</option>
+        ${options}
+      </select>
+      <div class="puck-actions">
+        <button type="button" class="btn-secondary" id="btn-ports" ${puckBusy ? "disabled" : ""}>
+          Rescan ports
+        </button>
+        <button type="button" class="btn-secondary" id="btn-claim" ${puckBusy || !selectedPort ? "disabled" : ""}>
+          Claim this bay
+        </button>
+        <button type="button" class="btn-ghost" id="btn-follow" ${puckBusy || !selectedPort ? "disabled" : ""}>
+          ${followEnabled ? "Stop driving puck" : "Drive puck mood"}
+        </button>
+      </div>
+      ${
+        lastPuckMood
+          ? `<p class="puck-status">Last mood on puck: <strong>${lastPuckMood}</strong></p>`
+          : ""
+      }
+    </section>
+  `;
 }
 
 function render(app: HTMLElement) {
@@ -222,7 +408,7 @@ function render(app: HTMLElement) {
       ${
         state.connected
           ? `
-        <button type="button" class="btn-primary" id="btn-refresh" ${connecting ? "disabled" : ""}>
+        <button type="button" class="btn-primary" id="btn-refresh" ${connecting || puckBusy ? "disabled" : ""}>
           Refresh live mood
         </button>
         <button type="button" class="btn-secondary" id="btn-alerts">
@@ -253,6 +439,8 @@ function render(app: HTMLElement) {
       }
     </div>
 
+    ${renderPuckSection()}
+
     ${
       state.connected
         ? ""
@@ -265,8 +453,9 @@ function render(app: HTMLElement) {
     }
 
     <p class="footer-note">
-      Bay Buddy is a glanceable companion. Devices, alerts, history, and claims stay on
+      Bay Buddy is a glanceable companion. Devices, alerts, and history stay on
       <a href="${THERMALTRACE_URL}" id="link-tt">thermaltrace.dev</a>.
+      Claim puck binds a physical presence key to this bay.
     </p>
   `;
 
@@ -297,6 +486,18 @@ function render(app: HTMLElement) {
     state = demoBuddyState(demoTick);
     render(app);
   });
+  app.querySelector("#btn-ports")?.addEventListener("click", () => {
+    void refreshPorts(app, true);
+  });
+  app.querySelector("#btn-claim")?.addEventListener("click", () => {
+    void claimSelectedPuck(app);
+  });
+  app.querySelector("#btn-follow")?.addEventListener("click", () => {
+    toggleFollow(app);
+  });
+  app.querySelector("#puck-port")?.addEventListener("change", (e) => {
+    selectedPort = (e.target as HTMLSelectElement).value;
+  });
 }
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -309,7 +510,10 @@ window.addEventListener("DOMContentLoaded", () => {
       statusMessage = "Restoring ThermalTrace session…";
       render(app);
       await refreshLive(app, false);
-      if (state.connected) startPolling(app);
+      if (state.connected) {
+        startPolling(app);
+        await refreshPorts(app, false);
+      }
     } else {
       state = demoBuddyState(0);
       render(app);

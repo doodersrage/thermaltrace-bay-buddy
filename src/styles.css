@@ -292,6 +292,63 @@ button:active,
   line-height: 1.4;
 }
 
+.puck-panel {
+  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  padding: 1rem 1rem 1.1rem;
+}
+
+.puck-hint {
+  margin: 0 0 0.85rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.puck-hint code {
+  color: var(--thermal-soft);
+  font-size: 0.8rem;
+}
+
+.field-label {
+  display: block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+#puck-port {
+  width: 100%;
+  appearance: none;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+  font: inherit;
+  margin-bottom: 0.75rem;
+}
+
+.puck-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.puck-status {
+  margin: 0.75rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.puck-status strong {
+  color: var(--ok);
+  font-weight: 600;
+}
+
 button:disabled {
   opacity: 0.55;
   cursor: not-allowed;

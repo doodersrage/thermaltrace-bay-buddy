@@ -340,6 +340,30 @@ async fn api_get_json<T: for<'de> Deserialize<'de>>(
     tokens: &SessionTokens,
     path: &str,
 ) -> Result<T, String> {
+    api_json::<T, ()>(tokens, reqwest::Method::GET, path, None).await
+}
+
+pub(crate) async fn api_get_json_pub<T: for<'de> Deserialize<'de>>(
+    tokens: &SessionTokens,
+    path: &str,
+) -> Result<T, String> {
+    api_get_json(tokens, path).await
+}
+
+pub(crate) async fn api_post_json<T: for<'de> Deserialize<'de>, B: Serialize>(
+    tokens: &SessionTokens,
+    path: &str,
+    body: &B,
+) -> Result<T, String> {
+    api_json(tokens, reqwest::Method::POST, path, Some(body)).await
+}
+
+async fn api_json<T: for<'de> Deserialize<'de>, B: Serialize>(
+    tokens: &SessionTokens,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<&B>,
+) -> Result<T, String> {
     if tokens.access_token.is_empty() || tokens.refresh_token.is_empty() {
         return Err("Missing session tokens after exchange".into());
     }
@@ -349,17 +373,23 @@ async fn api_get_json<T: for<'de> Deserialize<'de>>(
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Prefer Bearer headers (Android-style companion auth). Cookie parsing of
-    // long JWTs has been unreliable for the desktop AppImage path.
-    let res = client
-        .get(format!("{API_BASE}{path}"))
+    let mut req = client
+        .request(method, format!("{API_BASE}{path}"))
         .header("Accept", "application/json")
         .header(
             "Authorization",
             format!("Bearer {}", tokens.access_token),
         )
         .header("X-SB-Refresh-Token", tokens.refresh_token.as_str())
-        .header("X-SB-MFA-Required", "0")
+        .header("X-SB-MFA-Required", "0");
+
+    if let Some(payload) = body {
+        req = req
+            .header("Content-Type", "application/json")
+            .json(payload);
+    }
+
+    let res = req
         .send()
         .await
         .map_err(|e| format!("request failed: {e}"))?;

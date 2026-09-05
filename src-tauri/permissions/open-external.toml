@@ -22,3 +22,28 @@ commands.allow = ["has_companion_session"]
 identifier = "allow-fetch-buddy-state"
 description = "Fetch live buddy state from ThermalTrace APIs"
 commands.allow = ["fetch_buddy_state"]
+
+[[permission]]
+identifier = "allow-list-serial-ports"
+description = "List USB serial ports for claim-puck"
+commands.allow = ["list_serial_ports"]
+
+[[permission]]
+identifier = "allow-puck-info"
+description = "Query claim-puck INFO over serial"
+commands.allow = ["puck_info"]
+
+[[permission]]
+identifier = "allow-claim-puck"
+description = "Provision/register/claim a ThermalTrace claim puck"
+commands.allow = ["claim_puck"]
+
+[[permission]]
+identifier = "allow-push-puck-mood"
+description = "Push a mood to the claim puck over serial"
+commands.allow = ["push_puck_mood"]
+
+[[permission]]
+identifier = "allow-fetch-bay-mood"
+description = "Fetch derived bay mood from ThermalTrace"
+commands.allow = ["fetch_bay_mood"]

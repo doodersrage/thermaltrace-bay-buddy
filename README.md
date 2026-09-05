@@ -13,6 +13,17 @@ Desktop companion for [ThermalTrace](https://thermaltrace.dev) — glanceable fr
 
 Requires ThermalTrace server support for `/api/auth/companion/start` (deployed with the companion auth changes).
 
+## Claim puck
+
+When connected, Bay Buddy can claim a [claim-puck](https://github.com/doodersrage/thermaltrace-claim-puck) (RP2040-Zero):
+
+1. Flash claim-puck CircuitPython firmware and wire **GP4 → GND** button
+2. Plug the puck into USB
+3. **Rescan ports** → **Claim this bay** → press the puck button when the LED turns yellow
+4. Optionally **Drive puck mood** to push live `GET /api/bays/{bay}/mood` onto the LED
+
+Requires the ThermalTrace claim-puck API + Supabase `pucks` migration.
+
 ## Platforms
 
 | OS | Artifacts |
