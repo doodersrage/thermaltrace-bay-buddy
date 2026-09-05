@@ -2,3 +2,23 @@
 identifier = "allow-open-external"
 description = "Open http(s) links in the system browser (AppImage-safe env)"
 commands.allow = ["open_external"]
+
+[[permission]]
+identifier = "allow-start-companion-login"
+description = "Start ThermalTrace companion OAuth via localhost loopback"
+commands.allow = ["start_companion_login"]
+
+[[permission]]
+identifier = "allow-disconnect-companion"
+description = "Clear stored ThermalTrace companion session"
+commands.allow = ["disconnect_companion"]
+
+[[permission]]
+identifier = "allow-has-companion-session"
+description = "Check whether a companion session is stored"
+commands.allow = ["has_companion_session"]
+
+[[permission]]
+identifier = "allow-fetch-buddy-state"
+description = "Fetch live buddy state from ThermalTrace APIs"
+commands.allow = ["fetch_buddy_state"]

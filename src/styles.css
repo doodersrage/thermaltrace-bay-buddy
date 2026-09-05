@@ -284,6 +284,19 @@ button:active,
   color: var(--thermal-soft);
 }
 
+.connect-hint {
+  margin: 0 0 0.35rem;
+  text-align: center;
+  font-size: 0.88rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 section h2 {
   font-family: Sora, sans-serif;
   font-size: 0.95rem;

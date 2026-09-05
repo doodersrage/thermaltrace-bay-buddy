@@ -1,14 +1,31 @@
 import { invoke } from "@tauri-apps/api/core";
-import { DEMO_NEAR_MISSES, demoBuddyState } from "./mood";
+import { DEMO_NEAR_MISSES, captionFor, demoBuddyState, resolveMood } from "./mood";
 import type { BuddyState, NearMiss } from "./types";
 
 const THERMALTRACE_URL = "https://thermaltrace.dev";
-const CONNECT_URL = "https://thermaltrace.dev/signin";
 const ALERTS_URL = "https://thermaltrace.dev/dashboard/alerts";
 
+interface LiveBuddyPayload {
+  connected: boolean;
+  spaceName: string;
+  temperatureF: number | null;
+  freezeThresholdF: number;
+  freezeMarginF: number | null;
+  timeToFreezeHours: number | null;
+  doorOpen: boolean;
+  wetContact: boolean;
+  feedHealthy: boolean;
+  spaces: string[];
+  lastUpdated: string;
+}
+
 let demoTick = 0;
+let previousMargin: number | null = null;
 let state: BuddyState = demoBuddyState(0);
 let statusMessage = "";
+let connecting = false;
+let pollTimer: number | null = null;
+let selectedSpace: string | null = null;
 
 function formatTemp(f: number | null): string {
   if (f === null) return "—";
@@ -27,6 +44,40 @@ function formatHours(h: number | null): string {
   return `${h.toFixed(1)}h`;
 }
 
+function liveToBuddy(payload: LiveBuddyPayload): BuddyState {
+  const recentlyRecovered =
+    previousMargin !== null &&
+    previousMargin <= 5 &&
+    (payload.freezeMarginF ?? 99) > 5 &&
+    !payload.wetContact &&
+    payload.feedHealthy;
+
+  previousMargin = payload.freezeMarginF;
+
+  const mood = resolveMood({
+    wetContact: payload.wetContact,
+    feedHealthy: payload.feedHealthy,
+    freezeMarginF: payload.freezeMarginF,
+    doorOpen: payload.doorOpen,
+    recentlyRecovered,
+  });
+
+  return {
+    spaceName: payload.spaceName,
+    connected: true,
+    temperatureF: payload.temperatureF,
+    freezeThresholdF: payload.freezeThresholdF,
+    freezeMarginF: payload.freezeMarginF,
+    timeToFreezeHours: payload.timeToFreezeHours,
+    doorOpen: payload.doorOpen,
+    wetContact: payload.wetContact,
+    feedHealthy: payload.feedHealthy,
+    mood,
+    caption: captionFor(mood),
+    lastUpdated: payload.lastUpdated,
+  };
+}
+
 async function openExternal(url: string, app: HTMLElement) {
   statusMessage = "";
   try {
@@ -35,7 +86,6 @@ async function openExternal(url: string, app: HTMLElement) {
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     statusMessage = `Couldn’t open browser. Copy this URL: ${url} (${detail})`;
-    console.error("open_external failed", err);
   }
   render(app);
   if (statusMessage.startsWith("Opening ")) {
@@ -44,6 +94,71 @@ async function openExternal(url: string, app: HTMLElement) {
       render(app);
     }, 3500);
   }
+}
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function startPolling(app: HTMLElement) {
+  stopPolling();
+  pollTimer = window.setInterval(() => {
+    void refreshLive(app, false);
+  }, 45_000);
+}
+
+async function refreshLive(app: HTMLElement, showStatus: boolean) {
+  try {
+    const payload = await invoke<LiveBuddyPayload>("fetch_buddy_state", {
+      space: selectedSpace,
+    });
+    state = liveToBuddy(payload);
+    if (showStatus) statusMessage = "Live readings updated";
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    if (detail.toLowerCase().includes("session expired")) {
+      stopPolling();
+      state = demoBuddyState(0);
+      statusMessage = "Session expired — connect again";
+    } else if (showStatus) {
+      statusMessage = `Couldn’t refresh: ${detail}`;
+    }
+  }
+  render(app);
+}
+
+async function connect(app: HTMLElement, provider?: string) {
+  connecting = true;
+  statusMessage = "Waiting for browser sign-in… finish there, then we’ll pull you back.";
+  render(app);
+  try {
+    const payload = await invoke<LiveBuddyPayload>("start_companion_login", {
+      provider: provider ?? null,
+    });
+    state = liveToBuddy(payload);
+    selectedSpace = payload.spaceName;
+    statusMessage = `Connected to ${payload.spaceName}`;
+    startPolling(app);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    statusMessage = `Connect failed: ${detail}`;
+  } finally {
+    connecting = false;
+    render(app);
+  }
+}
+
+async function disconnect(app: HTMLElement) {
+  stopPolling();
+  await invoke("disconnect_companion");
+  previousMargin = null;
+  selectedSpace = null;
+  state = demoBuddyState(0);
+  statusMessage = "Disconnected — back to demo mode";
+  render(app);
 }
 
 function renderNearMisses(items: NearMiss[]): string {
@@ -104,15 +219,33 @@ function render(app: HTMLElement) {
     </section>
 
     <div class="actions">
-      <button type="button" class="btn-primary" id="btn-connect">
-        ${state.connected ? "Open ThermalTrace" : "Connect ThermalTrace"}
-      </button>
-      <button type="button" class="btn-secondary" id="btn-demo">
-        Cycle demo mood
-      </button>
-      <button type="button" class="btn-ghost" id="btn-alerts">
-        Alert settings on thermaltrace.dev
-      </button>
+      ${
+        state.connected
+          ? `
+        <button type="button" class="btn-primary" id="btn-refresh" ${connecting ? "disabled" : ""}>
+          Refresh live mood
+        </button>
+        <button type="button" class="btn-secondary" id="btn-alerts">
+          Alert settings on thermaltrace.dev
+        </button>
+        <button type="button" class="btn-ghost" id="btn-disconnect">
+          Disconnect
+        </button>`
+          : `
+        <p class="connect-hint">Sign in to ThermalTrace — we’ll open your browser, then return here with live readings.</p>
+        <button type="button" class="btn-primary" id="btn-google" ${connecting ? "disabled" : ""}>
+          Connect with Google
+        </button>
+        <button type="button" class="btn-secondary" id="btn-github" ${connecting ? "disabled" : ""}>
+          Connect with GitHub
+        </button>
+        <button type="button" class="btn-secondary" id="btn-email" ${connecting ? "disabled" : ""}>
+          Connect with email in browser
+        </button>
+        <button type="button" class="btn-ghost" id="btn-demo" ${connecting ? "disabled" : ""}>
+          Cycle demo mood
+        </button>`
+      }
       ${
         statusMessage
           ? `<p class="action-status" role="status">${statusMessage}</p>`
@@ -120,12 +253,16 @@ function render(app: HTMLElement) {
       }
     </div>
 
-    <section>
+    ${
+      state.connected
+        ? ""
+        : `<section>
       <h2>Near-miss reel</h2>
       <ul class="near-misses">
         ${renderNearMisses(DEMO_NEAR_MISSES)}
       </ul>
-    </section>
+    </section>`
+    }
 
     <p class="footer-note">
       Bay Buddy is a glanceable companion. Devices, alerts, history, and claims stay on
@@ -133,8 +270,20 @@ function render(app: HTMLElement) {
     </p>
   `;
 
-  app.querySelector("#btn-connect")?.addEventListener("click", () => {
-    void openExternal(state.connected ? THERMALTRACE_URL : CONNECT_URL, app);
+  app.querySelector("#btn-google")?.addEventListener("click", () => {
+    void connect(app, "google");
+  });
+  app.querySelector("#btn-github")?.addEventListener("click", () => {
+    void connect(app, "github");
+  });
+  app.querySelector("#btn-email")?.addEventListener("click", () => {
+    void connect(app);
+  });
+  app.querySelector("#btn-refresh")?.addEventListener("click", () => {
+    void refreshLive(app, true);
+  });
+  app.querySelector("#btn-disconnect")?.addEventListener("click", () => {
+    void disconnect(app);
   });
   app.querySelector("#btn-alerts")?.addEventListener("click", () => {
     void openExternal(ALERTS_URL, app);
@@ -153,6 +302,17 @@ function render(app: HTMLElement) {
 window.addEventListener("DOMContentLoaded", () => {
   const app = document.querySelector<HTMLElement>("#app");
   if (!app) return;
-  state = demoBuddyState(0);
-  render(app);
+
+  void (async () => {
+    const hasSession = await invoke<boolean>("has_companion_session");
+    if (hasSession) {
+      statusMessage = "Restoring ThermalTrace session…";
+      render(app);
+      await refreshLive(app, false);
+      if (state.connected) startPolling(app);
+    } else {
+      state = demoBuddyState(0);
+      render(app);
+    }
+  })();
 });

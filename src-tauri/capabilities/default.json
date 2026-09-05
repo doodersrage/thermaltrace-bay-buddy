@@ -6,6 +6,10 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "allow-open-external"
+    "allow-open-external",
+    "allow-start-companion-login",
+    "allow-disconnect-companion",
+    "allow-has-companion-session",
+    "allow-fetch-buddy-state"
   ]
 }
