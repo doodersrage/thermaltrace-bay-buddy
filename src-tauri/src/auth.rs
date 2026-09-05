@@ -64,13 +64,6 @@ pub fn clear_session(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn cookie_header(tokens: &SessionTokens) -> String {
-    format!(
-        "sb-access-token={}; sb-refresh-token={}",
-        tokens.access_token, tokens.refresh_token
-    )
-}
-
 fn percent_encode(value: &str) -> String {
     let mut out = String::with_capacity(value.len() * 3);
     for b in value.bytes() {
@@ -114,18 +107,77 @@ fn percent_decode(value: &str) -> String {
 }
 
 fn parse_exchange_from_request(request: &str) -> Option<String> {
-    let first = request.lines().next()?;
+    let (headers, body) = request
+        .split_once("\r\n\r\n")
+        .or_else(|| request.split_once("\n\n"))
+        .unwrap_or((request, ""));
+
+    let first = headers.lines().next()?;
     let path = first.split_whitespace().nth(1)?;
-    let query = path.split('?').nth(1)?;
-    for pair in query.split('&') {
+
+    // GET /oauth?exchange=...
+    if let Some(query) = path.split('?').nth(1) {
+        for pair in query.split('&') {
+            let mut parts = pair.splitn(2, '=');
+            let key = parts.next()?;
+            let value = parts.next().unwrap_or("");
+            if key == "exchange" {
+                return Some(percent_decode(value));
+            }
+        }
+    }
+
+    // POST application/x-www-form-urlencoded body: exchange=...
+    for pair in body.split('&') {
         let mut parts = pair.splitn(2, '=');
         let key = parts.next()?;
         let value = parts.next().unwrap_or("");
         if key == "exchange" {
-            return Some(percent_decode(value));
+            return Some(percent_decode(value.trim()));
         }
     }
+
     None
+}
+
+fn read_http_request(stream: &mut std::net::TcpStream) -> Result<String, String> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .ok();
+
+    let mut data = Vec::with_capacity(64 * 1024);
+    let mut buf = [0u8; 16 * 1024];
+    loop {
+        let n = stream.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&buf[..n]);
+        if data.len() > 512 * 1024 {
+            return Err("Browser return request too large".into());
+        }
+        let text = String::from_utf8_lossy(&data);
+        if let Some(header_end) = text.find("\r\n\r\n").or_else(|| text.find("\n\n")) {
+            let sep_len = if text[header_end..].starts_with("\r\n\r\n") {
+                4
+            } else {
+                2
+            };
+            let headers = &text[..header_end];
+            let mut content_length = 0usize;
+            for line in headers.lines().skip(1) {
+                let lower = line.to_ascii_lowercase();
+                if let Some(v) = lower.strip_prefix("content-length:") {
+                    content_length = v.trim().parse().unwrap_or(0);
+                }
+            }
+            let body_start = header_end + sep_len;
+            if data.len() >= body_start + content_length {
+                break;
+            }
+        }
+    }
+    Ok(String::from_utf8_lossy(&data).into_owned())
 }
 
 fn wait_for_loopback_exchange(listener: TcpListener) -> Result<String, String> {
@@ -150,15 +202,14 @@ fn wait_for_loopback_exchange(listener: TcpListener) -> Result<String, String> {
     stream
         .set_nonblocking(false)
         .map_err(|e| e.to_string())?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .ok();
 
-    let mut buf = [0u8; 8192];
-    let n = stream.read(&mut buf).map_err(|e| e.to_string())?;
-    let request = String::from_utf8_lossy(&buf[..n]);
-    let exchange = parse_exchange_from_request(&request)
-        .ok_or_else(|| "Browser returned without an exchange token".to_string())?;
+    let request = read_http_request(&mut stream)?;
+    let exchange = parse_exchange_from_request(&request).ok_or_else(|| {
+        format!(
+            "Browser returned without an exchange token (received {} bytes)",
+            request.len()
+        )
+    })?;
 
     let body = "<!doctype html><html><body style=\"font-family:system-ui;background:#090b0f;color:#f3f6fb;padding:2rem\"><h1>Bay Buddy connected</h1><p>You can close this tab and return to the app.</p></body></html>";
     let response = format!(
@@ -233,7 +284,7 @@ pub async fn start_companion_login(
     let tokens = exchange_token(&exchange).await?;
     save_session(&app, &tokens)?;
     let _ = app.emit("auth://connected", ());
-    fetch_live_buddy(&app, None).await
+    fetch_live_buddy_with_tokens(&tokens, None).await
 }
 
 #[tauri::command]
@@ -289,21 +340,49 @@ async fn api_get_json<T: for<'de> Deserialize<'de>>(
     tokens: &SessionTokens,
     path: &str,
 ) -> Result<T, String> {
-    let client = reqwest::Client::new();
+    if tokens.access_token.is_empty() || tokens.refresh_token.is_empty() {
+        return Err("Missing session tokens after exchange".into());
+    }
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // Prefer Bearer headers (Android-style companion auth). Cookie parsing of
+    // long JWTs has been unreliable for the desktop AppImage path.
     let res = client
         .get(format!("{API_BASE}{path}"))
         .header("Accept", "application/json")
-        .header("Cookie", cookie_header(tokens))
+        .header(
+            "Authorization",
+            format!("Bearer {}", tokens.access_token),
+        )
+        .header("X-SB-Refresh-Token", tokens.refresh_token.as_str())
+        .header("X-SB-MFA-Required", "0")
         .send()
         .await
         .map_err(|e| format!("request failed: {e}"))?;
 
-    if res.status().as_u16() == 401 {
-        return Err("Session expired — connect again".into());
-    }
-    if !res.status().is_success() {
+    let status = res.status().as_u16();
+    if status == 401 {
         let body = res.text().await.unwrap_or_default();
-        return Err(format!("API error: {body}"));
+        if body.contains("MFA required") {
+            return Err(
+                "MFA required — finish MFA in the browser on thermaltrace.dev, then connect again"
+                    .into(),
+            );
+        }
+        return Err(format!(
+            "Session rejected by ThermalTrace (HTTP 401). access_len={} refresh_len={} body={}",
+            tokens.access_token.len(),
+            tokens.refresh_token.len(),
+            body.chars().take(180).collect::<String>()
+        ));
+    }
+    if !(200..300).contains(&status) {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("API error HTTP {status}: {body}"));
     }
 
     res.json::<T>()
@@ -351,15 +430,21 @@ pub async fn fetch_live_buddy(
     space: Option<String>,
 ) -> Result<LiveBuddyPayload, String> {
     let tokens = load_session(app).ok_or_else(|| "Not connected".to_string())?;
+    fetch_live_buddy_with_tokens(&tokens, space).await
+}
 
+pub async fn fetch_live_buddy_with_tokens(
+    tokens: &SessionTokens,
+    space: Option<String>,
+) -> Result<LiveBuddyPayload, String> {
     let space_q = space
         .as_deref()
         .map(|s| format!("&space={}", percent_encode(s)))
         .unwrap_or_default();
 
     let readings: ReadingsResponse =
-        api_get_json(&tokens, &format!("/api/home/readings?save=0{space_q}")).await?;
-    let insights: InsightsResponse = api_get_json(&tokens, "/api/user/home-insights").await?;
+        api_get_json(tokens, &format!("/api/home/readings?save=0{space_q}")).await?;
+    let insights: InsightsResponse = api_get_json(tokens, "/api/user/home-insights").await?;
 
     let sensors = readings.sensors.unwrap_or_default();
     let spaces = readings.spaces.unwrap_or_default();
